@@ -30,5 +30,11 @@ public:
 	FORCEINLINE class USphereComponent* GetCollisionComp() const { return CollisionComp; }
 	/** Returns ProjectileMovement subobject **/
 	FORCEINLINE class UProjectileMovementComponent* GetProjectileMovement() const { return ProjectileMovement; }
+
+protected:
+
+	// Damage of the projectile
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Damage)
+	float damage;
 };
 
