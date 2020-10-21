@@ -23,6 +23,9 @@ public: // Public functions
 	/** Returns FirstPersonCameraComponent subobject **/
 	FORCEINLINE class UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
 
+	// Property replication
+	void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 protected:
 
 	virtual void BeginPlay();
@@ -30,14 +33,9 @@ protected:
 	/** Fires a projectile. */
 	void OnFire();
 
-	UFUNCTION(Server, Reliable)
-	void ServerFire(const FVector pos, const FVector dir); // position and direction of the shot
 
-	void Fire(const FVector pos, const FVector dir);
-
-	// All players should run shoot effects
-	UFUNCTION(NetMultiCast, Unreliable)
-	void MultiCastShootEffects();
+	UFUNCTION(BlueprintImplementableEvent)
+	void Fire();
 
 	/** Handles moving forward/backward */
 	void MoveForward(float Val);
@@ -61,10 +59,29 @@ protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* InputComponent) override;
 	// End of APawn interface
 
+	// For when the character dies
+	UFUNCTION()
+	void OnRep_CharacterDead();
+
+	void RespawnCharacter();
+
+	void ActivateRagdoll();
+
+	void ResetCharacter();
+
+	UFUNCTION()
+	void HealthModified();
+
+	UFUNCTION(Server, Unreliable)
+	void CorrectPitchServer(FRotator rotation);
+
+	UFUNCTION(NetMultiCast, Unreliable)
+		void CorrectPitchMulticast(FRotator rotation);
+
 public: // Public variables
 
 	/** Pawn mesh: 1st person view (arms; seen only by self) */
-	UPROPERTY(VisibleDefaultsOnly, Category = Mesh)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = Mesh)
 		class USkeletalMeshComponent* FPMesh;
 
 	/** Gun mesh: 1st person view (seen only by self) */
@@ -72,11 +89,11 @@ public: // Public variables
 		class USkeletalMeshComponent* FPGun;
 
 	/** Location on gun mesh where projectiles should spawn. (first person)*/
-	UPROPERTY(VisibleDefaultsOnly, Category = Mesh)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = Mesh)
 		class USceneComponent* FPMuzzleLocation;
 
 	/** AnimMontage to play each time we fire (first person) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Gameplay)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Gameplay)
 		class UAnimMontage* FPFireAnimation;
 
 	/** First person camera */
@@ -104,16 +121,23 @@ public: // Public variables
 		FVector GunOffset;
 
 	/** Projectile class to spawn */
-	UPROPERTY(EditDefaultsOnly, Category = Projectile)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Projectile)
 		TSubclassOf<class ABMShooterProjectile> ProjectileClass;
 
 	/** Sound to play each time we fire */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Gameplay)
 		class USoundBase* FireSound;
 	// Health component
-	UPROPERTY(EditAnywhere, Category = Health)
-		class UHealthComponent* healthComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = Health)
+		class UHealthComponent* healthComponent = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Gameplay)
+		float respawnTime;
 
+	UPROPERTY(ReplicatedUsing = OnRep_CharacterDead, BlueprintReadOnly)
+		bool characterDead;
+	
+	UPROPERTY(BlueprintReadOnly)
+		FRotator correctedRotation;
 };
 

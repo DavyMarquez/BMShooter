@@ -12,6 +12,8 @@ class BMSHOOTER_API UHealthComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnHealthModifiedDelegate);
+
 public:	
 	// Sets default values for this component's properties
 	UHealthComponent();
@@ -38,6 +40,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = Health)
 	void SetCurrentHealth(float health);
 
+	// called when character receives damage
+	UFUNCTION()
+		void ReceiveDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType, class AController* InstigatedBy, AActor* DamageCauser);
+
+	UFUNCTION(Category = Health)
+	void ResetHealth();
+
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
@@ -49,8 +58,6 @@ protected:
 	// Called from server after currentHealth modification and from clients afetr repNotify 
 	void OnCurrentHealthUpdate();
 
-public:
-
 protected:
 	
 	// Max health of the character
@@ -61,8 +68,8 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_CurrentHealth)
 	float currentHealth;
 
-private:
-
-	class ABMShooterCharacter* _owner;
-
+public:
+	//For notifying health modifications
+	UPROPERTY()
+	FOnHealthModifiedDelegate OnHealthModifiedDelegate;
 };

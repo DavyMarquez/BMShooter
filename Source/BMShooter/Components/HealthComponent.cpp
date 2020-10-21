@@ -20,11 +20,13 @@ UHealthComponent::UHealthComponent() {
 void UHealthComponent::BeginPlay() {
 	Super::BeginPlay();
 
-	
+	if (GetOwner()) {
+		GetOwner()->OnTakeAnyDamage.AddDynamic(this, &UHealthComponent::ReceiveDamage);
+	}
 }
  
 void UHealthComponent::OnRep_CurrentHealth() {
-	OnCurrentHealthUpdate();
+	//OnCurrentHealthUpdate();
 }
 
 void UHealthComponent::OnCurrentHealthUpdate() {
@@ -42,6 +44,12 @@ void UHealthComponent::OnCurrentHealthUpdate() {
 		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Blue, healthMessage);
 	}
 
+	// broadcast health modified event
+	OnHealthModifiedDelegate.Broadcast();
+}
+
+void UHealthComponent::ReceiveDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType, class AController* InstigatedBy, AActor* DamageCauser) {
+	UHealthComponent::Damage(Damage);
 }
 
 void UHealthComponent::GetLifetimeReplicatedProps(TArray <FLifetimeProperty>& OutLifetimeProps) const {
@@ -78,4 +86,8 @@ void UHealthComponent::Heal(float amount) {
 
 void UHealthComponent::Damage(float amount) {
 	SetCurrentHealth(currentHealth - amount);
+}
+
+void UHealthComponent::ResetHealth() {
+	SetCurrentHealth(maxHealth);
 }

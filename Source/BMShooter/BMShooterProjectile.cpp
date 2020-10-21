@@ -3,6 +3,8 @@
 #include "BMShooterProjectile.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Components/SphereComponent.h"
+#include "BMShooterCharacter.h"
+#include "Engine/Engine.h"
 
 ABMShooterProjectile::ABMShooterProjectile() 
 {
@@ -33,15 +35,20 @@ ABMShooterProjectile::ABMShooterProjectile()
 
 void ABMShooterProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
+	// if server
 	if (GetLocalRole() == ROLE_Authority) {
-
+		if ((OtherActor != NULL) && (OtherActor != this) && (GetInstigator() != OtherActor) && OtherActor->IsA(ABMShooterCharacter::StaticClass())) {
+			FDamageEvent damageEvent;
+			// instigate damage
+			OtherActor->TakeDamage(damage, damageEvent, GetInstigatorController(), GetInstigator());
+			Destroy(true, true); // destroy only on server
+		}
 	}
-
-	// Only add impulse and destroy projectile if we hit a physics
-	if ((OtherActor != NULL) && (OtherActor != this) && (OtherComp != NULL) && OtherComp->IsSimulatingPhysics())
-	{
+	// if hit a simulating physic object add impulse
+	if ((OtherActor != NULL) && (OtherActor != this) && (OtherComp != NULL) && OtherComp->IsSimulatingPhysics()) {
 		OtherComp->AddImpulseAtLocation(GetVelocity() * 100.0f, GetActorLocation());
 
 		Destroy();
 	}
+
 }

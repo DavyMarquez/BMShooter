@@ -12,6 +12,8 @@
 #include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
 #include "Components/HealthComponent.h"
+#include "TimerManager.h"
+#include "NavigationSystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFPChar, Warning, All);
 
@@ -65,14 +67,20 @@ ABMShooterCharacter::ABMShooterCharacter()
 	healthComponent = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
 	if (healthComponent) {
 		healthComponent->SetIsReplicated(true);
+
+		// bind healthmodifieddelegate to local function
+		healthComponent->OnHealthModifiedDelegate.AddDynamic(this, &ABMShooterCharacter::HealthModified);
 	}
+
+	respawnTime = 10.0f;
+	characterDead = false;
 }
 
 void ABMShooterCharacter::BeginPlay()
 {
 	// Call the base class  
 	Super::BeginPlay();
-
+	
 	//Attach gun mesh component to Skeleton, doing it here because the skeleton is not yet created in the constructor
 	FPGun->AttachToComponent(FPMesh, FAttachmentTransformRules(EAttachmentRule::SnapToTarget, true), TEXT("GripPoint"));
 	FPGun->SetHiddenInGame(false);
@@ -81,6 +89,7 @@ void ABMShooterCharacter::BeginPlay()
 	
 	// hide third person mesh
 	GetMesh()->SetOwnerNoSee(true);
+
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -116,58 +125,9 @@ void ABMShooterCharacter::OnFire()
 	// try and fire a projectile
 	if (ProjectileClass != NULL)
 	{
-		FVector mousePos;
-		FVector mouseDir;
-
-		APlayerController* playerController = Cast<APlayerController>(GetController());
-		FVector2D screenPos = GEngine->GameViewport->Viewport->GetSizeXY();
-		playerController->DeprojectScreenPositionToWorld(screenPos.X / 2.0f, screenPos.Y / 2.0f, mousePos, mouseDir);
-		
-		mouseDir *= 100000.0f;
-
-		ServerFire(mousePos, mouseDir);
+		// call bp event
+		Fire();
 	}
-
-	// try and play a firing animation if specified
-	if (FPFireAnimation != NULL)
-	{
-		// Get the animation object for the arms mesh
-		UAnimInstance* AnimInstance = FPMesh->GetAnimInstance();
-		if (AnimInstance != NULL)
-		{
-			AnimInstance->Montage_Play(FPFireAnimation, 1.f);
-		}
-	}
-}
-
-void ABMShooterCharacter::Fire(const FVector pos, const FVector dir) {
-	//GEngine->AddOnScreenDebugMessage(-1, 3, FColor::Blue, FString(TEXT("Fire")));
-	//DrawDebugLine(GetWorld(), pos, dir, FColor::Red, true, 100, 0, 5.0f);
-
-	FVector muzzlePosition = FPMuzzleLocation->GetComponentLocation();
-	if (GetWorld()) {
-		FActorSpawnParameters SpawnInfo;
-		GetWorld()->SpawnActor< ABMShooterProjectile>(ProjectileClass, muzzlePosition, dir.Rotation(), SpawnInfo);
-	}
-}
-
-void ABMShooterCharacter::ServerFire_Implementation(const FVector pos, const FVector dir) {
-	Fire(pos, dir);
-	MultiCastShootEffects();
-}
-
-void ABMShooterCharacter::MultiCastShootEffects_Implementation(){
-	if (TPFireAnimation != NULL) {
-		UAnimInstance* animInstance = GetMesh()->GetAnimInstance();
-		if (animInstance != NULL) {
-			animInstance->Montage_Play(TPFireAnimation, 1.0f);
-		}
-	}
-	if (FireSound != NULL)
-	{
-		UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
-	}
-
 }
 
 void ABMShooterCharacter::MoveForward(float Value)
@@ -198,5 +158,116 @@ void ABMShooterCharacter::LookUpAtRate(float Rate)
 {
 	// calculate delta for this frame from the rate information
 	AddControllerPitchInput(Rate * BaseLookUpRate * GetWorld()->GetDeltaSeconds());
+
+	FRotator rotation = FirstPersonCameraComponent->GetComponentRotation();
+	CorrectPitchServer(rotation);
 }
 
+void ABMShooterCharacter::OnRep_CharacterDead()
+{
+	if (characterDead)
+	{
+		
+		ActivateRagdoll();
+	}
+	else
+	{
+		// If respawn restore character
+		ResetCharacter();
+	}
+}
+
+void ABMShooterCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const {
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	//Replicate current health.
+	DOREPLIFETIME(ABMShooterCharacter, characterDead);
+}
+
+void ABMShooterCharacter::RespawnCharacter() {
+	// spawn on server
+	if (GetLocalRole() == ROLE_Authority) {
+		UNavigationSystemV1* navigationSystem = UNavigationSystemV1::GetCurrent(GetWorld());
+		FNavLocation navLocation;
+		
+		navigationSystem->GetRandomPoint(navLocation); // get random point on nav mesh
+		SetActorLocation(navLocation);
+		SetActorLocation(GetActorLocation() + FVector(0.0f, 0.0f, 180.0f)); // it appeared on the floor otherwise
+		
+		healthComponent->ResetHealth();
+		characterDead = false;
+	}
+}
+
+void ABMShooterCharacter::ActivateRagdoll() {
+	GetMesh()->SetSimulatePhysics(true);
+	GetMesh()->SetCollisionProfileName("Ragdoll");
+
+	if (IsLocallyControlled()) {
+		// hide fp meshes and show tp meshes
+		FPMesh->SetOwnerNoSee(true);
+		FPGun->SetOwnerNoSee(true);
+		GetMesh()->SetOwnerNoSee(false);
+		TPGun->SetOwnerNoSee(false);
+		
+		// disable input
+		DisableInput(Cast<APlayerController>(GetController()));
+
+		// to see the ragdoll when dead
+		FirstPersonCameraComponent->bUsePawnControlRotation = false;
+		FirstPersonCameraComponent->SetRelativeRotation(FRotator(-90.0f, 0.0f, 0.0f));
+	}
+}
+
+void ABMShooterCharacter::ResetCharacter() {
+	GetMesh()->AttachTo(GetCapsuleComponent(), NAME_None, EAttachLocation::SnapToTarget, true);
+	GetMesh()->SetSimulatePhysics(false);
+	GetMesh()->SetCollisionProfileName("CharacterMesh");
+
+	if (IsLocallyControlled()) {
+		// hide tp meshes and show fp meshes
+		GetMesh()->SetOwnerNoSee(true);
+		TPGun->SetOwnerNoSee(true);
+		FPMesh->SetOwnerNoSee(false);
+		FPGun->SetOwnerNoSee(false);
+
+		// enable input 
+		EnableInput(Cast<APlayerController>(GetController()));
+
+		//reset camera values
+		
+		FirstPersonCameraComponent->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
+		FirstPersonCameraComponent->bUsePawnControlRotation = true;
+	}
+}
+
+void ABMShooterCharacter::HealthModified() {
+	if (GetLocalRole() == ROLE_Authority) {
+
+		// check on server if the character is dead
+		if (healthComponent->GetCurrentHealth() == 0 && !characterDead) {
+			characterDead = true;
+			FString text = "should respawn";
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Blue, text);
+			// Respawn character using unreal timer
+			FTimerHandle respawnTimer;
+			GetWorldTimerManager().SetTimer<ABMShooterCharacter>(respawnTimer, this, 
+				&ABMShooterCharacter::RespawnCharacter, respawnTime, false);
+		}
+	}
+
+
+	// modify widget
+	/*if (IsLocallyControlled())
+	{
+		OnHealthModification();
+	} */
+}
+
+void ABMShooterCharacter::CorrectPitchServer_Implementation(FRotator rotation) {
+	CorrectPitchMulticast(rotation);
+}
+
+void ABMShooterCharacter::CorrectPitchMulticast_Implementation(FRotator rotation) {
+	correctedRotation = rotation;
+}
